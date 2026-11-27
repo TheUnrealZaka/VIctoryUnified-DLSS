@@ -78,6 +78,10 @@ if not defined VICTORY_E5_TARGETS set "VICTORY_E5_TARGETS=r11g11b10"
 rem 6 threads translating draw calls (8 by default): fewer leave the fast cores to the submitting
 rem thread (cell: 8 -> 60.2 ms, 6 -> 50.2, 12 -> 63.1, 16 -> 71.5 on an i7-14700F).
 if not defined VICTORY_THIN_THREADS set "VICTORY_THIN_THREADS=6"
+rem Threads kept for the copies the submitting thread waits on (foxhound: 13.7 to 18.1 fps on a
+rem 12-thread CPU; 8 was slower). Only with 12 or more logical processors; override or test with
+rem set VICTORY_WIDE_THREADS=<n> before starting this file.
+if not defined VICTORY_WIDE_THREADS if %NUMBER_OF_PROCESSORS% GEQ 12 set "VICTORY_WIDE_THREADS=6"
 
 rem Series S upscaling through AMD's PC FSR DLL (from a PC game you own; not included).
 if not defined VICTORY_FSR_DLL if exist "%root%\fsr\amd_fidelityfx_upscaler_dx12.dll" set "VICTORY_FSR_DLL=%root%\fsr\amd_fidelityfx_upscaler_dx12.dll"

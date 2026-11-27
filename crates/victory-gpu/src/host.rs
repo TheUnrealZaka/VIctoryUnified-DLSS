@@ -8784,10 +8784,12 @@ impl Meter {
         split_line(frames);
         {
             let [passes, pieces, compares] = [0, 1, 2].map(|i| CARD_PASSES[i].swap(0, Ordering::Relaxed) as f64 / frames);
-            if passes + compares > 0.0 {
+            let wc_left = crate::shadow::WC_LEFT.swap(0, Ordering::Relaxed) as f64 / 1e6 / frames;
+            if passes + compares + wc_left > 0.0 {
                 tracing::info!(
                     "our passes over copies in the card's memory per frame: {passes:.0} hash passes over {pieces:.0} pieces after \
-                     ranges were sent up (VICTORY_CARD_REHASH_RUNS=1 joins them: now {}), {compares:.0} compare passes",
+                     ranges were sent up (VICTORY_CARD_REHASH_RUNS=1 joins them: now {}), {compares:.0} compare passes; \
+                     {wc_left:.1} MB declared written in write-combined memory left on the card (VICTORY_WC_NO_BACK)",
                     if rehash_runs() { "on" } else { "off" }
                 );
             }
@@ -8810,6 +8812,15 @@ impl Meter {
                      {through:.1} read through the kernel, {left:.1} left for the next refresh (a page was not there), \
                      {filled:.1} first fillings from the pages there (VICTORY_TEXTURE_FILL=0: left empty), {short:.1} of them \
                      with less than was mapped (looked at again)"
+                );
+            }
+            let [read, waited] =
+                [0, 1].map(|i| crate::texture::EXACT_UNLOCKED[i].swap(0, Ordering::Relaxed) as f64 / frames);
+            if read + waited > 0.0 {
+                tracing::info!(
+                    "exact texture refreshes (uploads before a bake) that found title memory being remapped, per frame: \
+                     {read:.1} read whole through the kernel without waiting, {waited:.1} waited (a page was not there) \
+                     (VICTORY_EXACT_NO_WAIT=0: all wait)"
                 );
             }
         }
