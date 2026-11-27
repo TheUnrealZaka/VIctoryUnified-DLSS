@@ -2689,6 +2689,7 @@ struct Flight {
 }
 
 /// One thing in the line of what waits for the card, in order.
+#[allow(clippy::large_enum_variant)]
 enum Late {
     Run(Flight),
     /// A bottom-of-pipe write of the flight before it: address, what, bytes.

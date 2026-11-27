@@ -1832,9 +1832,9 @@ impl Session {
         );
         let feature_api = FeatureApi {
             // SAFETY: pointers resolved from `slGetFeatureFunction`.
-            dlssg_get_state: unsafe { std::mem::transmute(dlssg_get_state) },
+            dlssg_get_state: unsafe { std::mem::transmute::<usize, FnDlssgGetState>(dlssg_get_state) },
             // SAFETY: as above.
-            dlssg_set_options: unsafe { std::mem::transmute(dlssg_set_options) },
+            dlssg_set_options: unsafe { std::mem::transmute::<usize, FnDlssgSetOptions>(dlssg_set_options) },
             reflex_get_state: reflex_get_state.map(|p| unsafe { std::mem::transmute(p) }),
             reflex_sleep: reflex_sleep.map(|p| unsafe { std::mem::transmute(p) }),
             reflex_set_options: reflex_set_options.map(|p| unsafe { std::mem::transmute(p) }),
@@ -2257,6 +2257,7 @@ impl Session {
         ));
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn prepare_present(
         &mut self,
         cfg: &DlssFgConfig,
@@ -2340,6 +2341,7 @@ impl Session {
             }
         };
 
+        #[allow(clippy::field_reassign_with_default)]
         let mut consts = Constants::default();
         consts.mvec_scale = mvec_scale;
         consts.jitter_offset = inputs.camera.jitter_offset;

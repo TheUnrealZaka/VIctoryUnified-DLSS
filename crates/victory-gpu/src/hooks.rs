@@ -365,7 +365,7 @@ pub(crate) fn take_frame_inputs() -> FrameInputs {
                     .iter()
                     .map(|(&(w, h, fmt, role), &(hits, ref shaders))| (hits, w, h, fmt, role, shaders.clone()))
                     .collect();
-                rows.sort_by(|a, b| b.0.cmp(&a.0));
+                rows.sort_by_key(|a| std::cmp::Reverse(a.0));
                 rows.truncate(24);
                 tracing::info!(
                     frame = b.probe_frames,
@@ -391,6 +391,7 @@ pub(crate) fn take_frame_inputs() -> FrameInputs {
 }
 
 /// Called from `fidelityfx.rs` when `ffxCreateContext` / `ffxDispatch` executes on Series S.
+#[allow(clippy::too_many_arguments)]
 pub fn record_fidelityfx_dispatch(
     list: *const std::ffi::c_void,
     depth_title: *const std::ffi::c_void,
@@ -761,26 +762,25 @@ pub(crate) fn on_pass(ctx: &PassContext<'_>) {
         };
 
         // Candidate Depth: DepthTarget >= 640x360 with depth format.
-        if !matched_depth_rule {
-            if let Some(dt) = ctx
+        if !matched_depth_rule
+            && let Some(dt) = ctx
                 .targets
                 .iter()
                 .find(|t| t.binding == HookBinding::DepthTarget && t.width >= 640 && t.height >= 360 && is_depth_format(t.format))
+        {
+            let score = prefer_render(dt.width, dt.height);
+            let should_capture = with_frame(|b| {
+                !b.inputs.from_fidelityfx && score >= b.depth_score
+            });
+            if should_capture
+                && let Some(tex) = capture_title_texture(ctx.list, HookRole::Depth, dt.title_resource, false, false)
             {
-                let score = prefer_render(dt.width, dt.height);
-                let should_capture = with_frame(|b| {
-                    !b.inputs.from_fidelityfx && score >= b.depth_score
+                with_frame(|b| {
+                    if !b.inputs.from_fidelityfx && score >= b.depth_score {
+                        b.depth_score = score;
+                        b.inputs.depth = Some(tex);
+                    }
                 });
-                if should_capture
-                    && let Some(tex) = capture_title_texture(ctx.list, HookRole::Depth, dt.title_resource, false, false)
-                {
-                    with_frame(|b| {
-                        if !b.inputs.from_fidelityfx && score >= b.depth_score {
-                            b.depth_score = score;
-                            b.inputs.depth = Some(tex);
-                        }
-                    });
-                }
             }
         }
 
