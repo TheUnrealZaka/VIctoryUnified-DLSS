@@ -2257,7 +2257,7 @@ impl Session {
         ));
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::field_reassign_with_default)]
     pub(crate) fn prepare_present(
         &mut self,
         cfg: &DlssFgConfig,
@@ -2341,7 +2341,6 @@ impl Session {
             }
         };
 
-        #[allow(clippy::field_reassign_with_default)]
         let mut consts = Constants::default();
         consts.mvec_scale = mvec_scale;
         consts.jitter_offset = inputs.camera.jitter_offset;
