@@ -15,6 +15,9 @@ mod translate;
 #[cfg(windows)]
 mod warm;
 
+/// Names this build; printed in the run log.
+pub const FORK_ID: &str = "VIctoryUnified-DLSS by TheUnrealZaka (https://github.com/TheUnrealZaka/VIctoryUnified-DLSS)";
+
 use std::path::PathBuf;
 
 use anyhow::Result;

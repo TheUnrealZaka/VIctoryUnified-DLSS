@@ -88,6 +88,8 @@ pub fn run(
     let original = std::fs::read(exe).with_context(|| format!("reading {}", exe.display()))?;
     let mut prepared = victory_loader::prepare(&original)?;
     let hash = prepared.original_hash.to_hex();
+    println!("fork           {}", crate::FORK_ID);
+    eprintln!("fork {}", crate::FORK_ID);
     match victory_game::identify(&hash) {
         Some(build) => println!("build          {} ({hash})", build.label),
         None => println!("build          unknown ({hash})"),

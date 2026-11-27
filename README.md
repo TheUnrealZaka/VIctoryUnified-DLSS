@@ -1,3 +1,19 @@
+# VIctoryUnified-DLSS
+
+Zakaria's (TheUnrealZaka) working copy of [trustno1-coder/VIctory-NVIDIA](https://github.com/trustno1-coder/VIctory-NVIDIA),
+all credit for the renderer, DLSS and frame generation to it and the projects it lists below. Added here:
+the `fork` line in the run log, and `scripts\play-5060.ps1` for hybrid-graphics laptops (picks the RTX
+card by name and sets the Windows high-performance GPU preference).
+
+```powershell
+.\Get-NVIDIA-DLSS.cmd                                   # once
+.\scripts\play-5060.ps1 -Exe 'C:\path\to\game_scarlett_master.exe'
+```
+
+This repository contains no game files. The older Streamline port is kept on the `main` branch.
+
+---
+
 # VIctory on NVIDIA
 
 > **Reporting a problem?** Please attach **both** logs from the run that went
