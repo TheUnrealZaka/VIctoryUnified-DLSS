@@ -3707,6 +3707,7 @@ fn late_line(frames: f64) {
 pub(crate) mod aside;
 pub(crate) mod awake;
 mod card_steps;
+#[allow(dead_code)] // device-removed report helper; its call sites were not merged
 pub(crate) mod indirects;
 #[cfg(feature = "diagnostics")]
 mod panel;
@@ -7782,6 +7783,7 @@ enum Touch {
     /// The copy is given to shaders.
     Write(usize),
     /// Title memory is written.
+    #[allow(dead_code)] // matched in `written_spans`; the code that builds it was not merged
     Title,
     Nothing,
     /// Another part of the submission begins.
