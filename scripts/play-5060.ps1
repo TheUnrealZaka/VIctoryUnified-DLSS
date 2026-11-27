@@ -6,10 +6,7 @@
 # -Preload (first run: builds every shader first), -More @{...}. VICTORY_NO_GPU_PREF=1 skips the GPU preference.
 # Run Get-NVIDIA-DLSS.cmd once first. Build first if there is no target\release\victory.exe (the launcher
 # builds it with cargo if it is missing).
-param(
-    [Parameter(Mandatory)][string]$Exe,
-    [Parameter(ValueFromRemainingArguments)]$Rest
-)
+param([string]$Exe)
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
 if (-not $env:VICTORY_NO_GPU_PREF) {
@@ -23,4 +20,6 @@ if (-not $env:VICTORY_NO_GPU_PREF) {
     } catch { Write-Host "Could not set the GPU preference: $_" }
 }
 Write-Host 'VIctoryUnified-DLSS by TheUnrealZaka | github.com/TheUnrealZaka/VIctoryUnified-DLSS'
-& (Join-Path $PSScriptRoot 'play-foxhound.ps1') -Exe $Exe -SeriesS -FrameGen @Rest
+& (Join-Path $PSScriptRoot 'play-foxhound.ps1') -Exe $Exe -SeriesS -FrameGen @args
+
+
