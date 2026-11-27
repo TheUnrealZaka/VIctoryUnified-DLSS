@@ -28,6 +28,9 @@ if not exist "%runner%" (
   exit /b 2
 )
 
+rem Laptops with two GPUs (Intel/AMD iGPU + NVIDIA): Windows would run victory.exe on the iGPU (about 4 fps).
+rem This asks Windows for the high-performance GPU for this exe only. VICTORY_NO_GPU_PREF=1 skips it.
+if not defined VICTORY_NO_GPU_PREF for %%I in ("%runner%") do reg add "HKCU\Software\Microsoft\DirectX\UserGpuPreferences" /v "%%~fI" /t REG_SZ /d "GpuPreference=2;" /f >nul 2>&1
 rem One-time move of the old cool_fox-nvidia cache and saves, so nothing has to be rebuilt.
 if exist "%LOCALAPPDATA%\cool_fox-nvidia\data" if not exist "%LOCALAPPDATA%\VIctoryUnified-DLSS\data" (
   mkdir "%LOCALAPPDATA%\VIctoryUnified-DLSS" 2>nul

@@ -78,6 +78,20 @@ Run `scripts\play-nvidia-8gb-x.cmd` for the same settings **without** frame gene
 Every setting in the launchers can be overridden by setting the variable before starting them
 (`VICTORY_DLSS_FG=off`, `VICTORY_CARD_BUFFERS_MB=...`, `VICTORY_LOG=info`, ...).
 
+## Troubleshooting: low fps
+
+- **About 4 fps on a laptop with two GPUs (Intel/AMD + NVIDIA).** The game was running on the
+  integrated GPU. The launchers now ask Windows for the high-performance GPU for `victory.exe`
+  (`VICTORY_NO_GPU_PREF=1` skips that). Check `logs\run-*.log`: the line `host adapter` must name
+  your NVIDIA card, with its dedicated VRAM. If it does not, set it by hand in Windows Settings,
+  System, Display, Graphics, add `target\fast\victory.exe`, Options, High performance.
+- **First run is slow for a long time.** The first session builds the pipeline cache (many
+  minutes of 2-10 fps); later sessions reuse it. It is kept in `%LOCALAPPDATA%\VIctoryUnified-DLSS`.
+- **Cards with more than 8 GB.** The launcher's memory settings were measured on 8 GB cards. On a
+  12 GB card you can try `set VICTORY_CARD_BUFFERS_MB=3072` before starting the launcher
+  (not tested yet; report what you see).
+- Still slow? Send the first 60 lines of the log and the Task Manager GPU graph.
+
 ## Optional
 
 `VICTORY_ICON=<file.ico>` sets the game window's icon from a file of your own.
