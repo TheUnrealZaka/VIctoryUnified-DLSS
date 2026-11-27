@@ -3,6 +3,8 @@
 //! Every command reads the user's own files and writes only to stdout or to
 //! the user's cache directory (outside the repository).
 
+#[cfg(all(windows, target_env = "msvc"))]
+mod agility;
 mod census;
 mod inspect;
 #[cfg(all(windows, feature = "diagnostics"))]
@@ -12,6 +14,10 @@ mod shader;
 mod translate;
 #[cfg(windows)]
 mod warm;
+
+/// Who made this fork; printed at start and written at the top of every log.
+pub const FORK_ID: &str =
+    "VIctoryUnified-DLSS by TheUnrealZaka (https://github.com/TheUnrealZaka/VIctoryUnified-DLSS)";
 
 use std::path::PathBuf;
 
@@ -142,6 +148,18 @@ enum Command {
         /// The console model the title sees (device type, memory).
         #[arg(long, value_enum, default_value_t = Console::SeriesX)]
         console: Console,
+        /// DLSS Frame Generation mode (overrides victory.toml / VICTORY_DLSS_FG).
+        #[arg(long, value_enum)]
+        dlss_fg: Option<DlssFgArg>,
+        /// Generated frames per rendered frame (1..=5, i.e. 2x..=6x).
+        #[arg(long)]
+        dlss_fg_frames: Option<u32>,
+        /// Streamline runtime DLL variant (production vs development).
+        #[arg(long, value_enum)]
+        dlss_fg_runtime: Option<SlRuntimeArg>,
+        /// Log candidate Depth, Motion Vector, and HUDless passes for hook tuning.
+        #[arg(long)]
+        dlss_fg_probe: bool,
         /// Arguments for the title, after `--` (it reads the whole command
         /// line; a title that relaunches itself passes some).
         #[arg(last = true)]
@@ -165,6 +183,20 @@ enum Unimplemented {
 enum Console {
     SeriesX,
     SeriesS,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub enum DlssFgArg {
+    Off,
+    On,
+    Auto,
+    Dynamic,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub enum SlRuntimeArg {
+    Prod,
+    Dev,
 }
 
 fn main() -> Result<()> {
@@ -222,10 +254,22 @@ fn main() -> Result<()> {
             strict,
             execute,
             console,
+            dlss_fg,
+            dlss_fg_frames,
+            dlss_fg_runtime,
+            dlss_fg_probe,
             title_args,
         } => {
             victory_hle::runtime::set_title_args(title_args);
-            run::run(&exe, unimplemented, strict, execute, console)
+            let fg = run::DlssFgOverrides {
+                mode: dlss_fg,
+                frames: dlss_fg_frames,
+                runtime: dlss_fg_runtime,
+                probe: dlss_fg_probe,
+            };
+            let result = run::run(&exe, unimplemented, strict, execute, console, fg);
+            victory_gpu::dlss_fg::shutdown();
+            result
         }
         #[cfg(all(windows, feature = "diagnostics"))]
         Command::Replay(options) => replay::run(options),

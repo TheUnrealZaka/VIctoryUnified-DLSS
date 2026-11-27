@@ -72,3 +72,36 @@ pub fn record(list: *const c_void, f: impl FnOnce(&mut Pass)) -> bool {
         state.replay(host); // (cool_fox port) sets again what a new host list would need
     })
 }
+
+/// Forwards FidelityFX upscale inputs (Series S FSR4, either PC redirect or Xbox spy)
+/// into the DLSS-FG frame hook state.
+#[allow(clippy::too_many_arguments)]
+pub fn record_fidelityfx_dispatch(
+    list: *const c_void,
+    depth_title: *const c_void,
+    mvec_title: *const c_void,
+    hudless_title: *const c_void,
+    jitter: [f32; 2],
+    mvec_scale: [f32; 2],
+    render_size: [u32; 2],
+    camera_near: f32,
+    camera_far: f32,
+    camera_fov_rad: f32,
+    reset: bool,
+    depth_inverted: bool,
+) {
+    crate::hooks::record_fidelityfx_dispatch(
+        list,
+        depth_title,
+        mvec_title,
+        hudless_title,
+        jitter,
+        mvec_scale,
+        render_size,
+        camera_near,
+        camera_far,
+        camera_fov_rad,
+        reset,
+        depth_inverted,
+    );
+}

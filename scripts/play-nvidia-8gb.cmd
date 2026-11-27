@@ -1,10 +1,11 @@
 @echo off
-rem cool_fox for 8 GB NVIDIA cards: Series S mode with the settings measured on an RTX 4060 8 GB
+rem VIctoryUnified-DLSS (by TheUnrealZaka): cool_fox for 8 GB NVIDIA cards + DLSS frame generation. Series S mode with the settings measured on an RTX 4060 8 GB
 rem (see README.md and PROGRESS.md).
 rem   scripts\play-nvidia-8gb.cmd "D:\path\to\your\game"        the folder with game_scarlett_master.exe
 rem   scripts\play-nvidia-8gb.cmd "D:\path\to\your\game" warm   translate every shader first, then play
 rem Every setting below can be overridden by setting the variable before starting this file.
-rem The game folder is only read; caches, saves and logs go to %LOCALAPPDATA%\cool_fox-nvidia.
+rem The game folder is only read; caches and saves go to %LOCALAPPDATA%\VIctoryUnified-DLSS,
+rem logs go to the "logs" folder of this repository (VIctoryUnified-DLSS\logs).
 setlocal EnableExtensions
 set "root=%~dp0.."
 
@@ -27,9 +28,19 @@ if not exist "%runner%" (
   exit /b 2
 )
 
-if not defined VICTORY_CACHE_DIR set "VICTORY_CACHE_DIR=%LOCALAPPDATA%\cool_fox-nvidia\cache"
-if not defined VICTORY_DATA_DIR set "VICTORY_DATA_DIR=%LOCALAPPDATA%\cool_fox-nvidia\data"
-set "logs=%LOCALAPPDATA%\cool_fox-nvidia\logs"
+rem DLSS frame generation: on if the Streamline DLLs are beside the exe or in "streamline" at the repo root;
+rem otherwise the game starts with it off. VICTORY_DLSS_FG=off skips it.
+if not defined VICTORY_DLSS_FG set "VICTORY_DLSS_FG=on"
+if not defined VICTORY_SL_DIR if exist "%root%\streamline\sl.interposer.dll" set "VICTORY_SL_DIR=%root%\streamline"
+rem One-time move of the old cool_fox-nvidia cache and saves, so nothing has to be rebuilt.
+if exist "%LOCALAPPDATA%\cool_fox-nvidia\data" if not exist "%LOCALAPPDATA%\VIctoryUnified-DLSS\data" (
+  mkdir "%LOCALAPPDATA%\VIctoryUnified-DLSS" 2>nul
+  move "%LOCALAPPDATA%\cool_fox-nvidia\cache" "%LOCALAPPDATA%\VIctoryUnified-DLSS\cache" >nul 2>&1
+  move "%LOCALAPPDATA%\cool_fox-nvidia\data" "%LOCALAPPDATA%\VIctoryUnified-DLSS\data" >nul 2>&1
+)
+if not defined VICTORY_CACHE_DIR set "VICTORY_CACHE_DIR=%LOCALAPPDATA%\VIctoryUnified-DLSS\cache"
+if not defined VICTORY_DATA_DIR set "VICTORY_DATA_DIR=%LOCALAPPDATA%\VIctoryUnified-DLSS\data"
+set "logs=%root%\logs"
 if not exist "%logs%" mkdir "%logs%"
 
 rem --- cool_fox's pareto-residency set (codec_d) ---
@@ -85,6 +96,7 @@ echo Translating every shader into the cache (a few minutes, once per build)...
 :play
 for /f "tokens=1-3 delims=/:. " %%a in ("%time: =0%") do set "stamp=%%a%%b%%c"
 set "log=%logs%\run-%stamp%.log"
+echo VIctoryUnified-DLSS by TheUnrealZaka ^| github.com/TheUnrealZaka/VIctoryUnified-DLSS
 echo Starting. Log: %log%
-"%runner%" run "%VICTORY_GAME_DIR%\game_scarlett_master.exe" --console series-s --execute 2> "%log%"
+"%runner%" run "%VICTORY_GAME_DIR%\game_scarlett_master.exe" --console series-s --dlss-fg on --dlss-fg-frames 1 --execute 2> "%log%"
 exit /b %errorlevel%

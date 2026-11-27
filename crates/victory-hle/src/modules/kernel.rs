@@ -158,7 +158,17 @@ pub extern "system" fn GetProcAddress(module: *mut c_void, name: *const u8) -> *
         module
     };
     let Some(m) = registry().iter().find(|m| handle(m) == module) else {
-        return host_override(module, name).unwrap_or_else(|| host::get_proc_address(module, name));
+        let addr = host_override(module, name).unwrap_or_else(|| host::get_proc_address(module, name));
+        #[cfg(windows)]
+        if !addr.is_null()
+            && (name as usize) >= 0x1_0000
+            && let Some(path) = runtime::image_path(module as usize)
+            && let Some(file) = path.file_name().and_then(|n| n.to_str())
+        {
+            return super::fidelityfx::wrap_xbox_export(file, &narrow(name), addr as usize)
+                as *mut c_void;
+        }
+        return addr;
     };
     // Values below 0x10000 are ordinals; we export by name only.
     if (name as usize) < 0x1_0000 {

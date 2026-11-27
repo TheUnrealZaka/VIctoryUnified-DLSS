@@ -13,6 +13,8 @@
 
 # Local configuration (contains paths to YOUR files)
 /victory.toml
+# Run logs written by scripts/play-nvidia-8gb*.cmd
+/logs/
 
 # Places people tend to drop data into. Keep data outside the repo instead.
 /game/
@@ -47,6 +49,8 @@
 *.bin
 # The one exception (docs/asset-policy.md): the BCPack format's constant tables.
 !/crates/victory-formats/src/bcpack-tables.bin
+# NVIDIA's public Streamline signing key (docs/asset-policy.md).
+!/crates/victory-gpu/src/nvidia-streamline-public-key.bin
 *.dat
 *.pak
 *.rpf
