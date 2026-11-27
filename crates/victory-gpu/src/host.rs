@@ -10367,7 +10367,14 @@ impl Meter {
         // (Fox port A) Our scripts' caption: "Scarlett | <game> | F FPS | M ms
         // | D draws" (fields split at '|'; run-auto/input-check/run-compare).
         let _ = ms;
-        let text = crate::shell::caption_for(caption, fps, draws);
+        let mut text = crate::shell::caption_for(caption, fps, draws);
+        // DLSS frame generation: "DLSS-G 2x" while it generates frames, or
+        // "DLSS-G deferred (<reason>)" while it waits for depth/motion vectors.
+        // Added as the last '|' field so the fields before it stay as they were.
+        if let Some(badge) = crate::streamline::overlay_badge() {
+            text.push_str(" | ");
+            text.push_str(&badge);
+        }
         let mut text: Vec<u16> = text.encode_utf16().collect();
         text.push(0);
         // Setting the text waits for the window's thread (a title thread,
