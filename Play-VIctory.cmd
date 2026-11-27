@@ -36,5 +36,11 @@ if not defined VICTORY_UPLOAD_AHEAD set "VICTORY_UPLOAD_AHEAD=1"
 if not defined VICTORY_LEVELS_ON_DEMAND set "VICTORY_LEVELS_ON_DEMAND=1"
 if not defined VICTORY_CARD_BUFFERS_MIN_KB set "VICTORY_CARD_BUFFERS_MIN_KB=64"
 if not defined VICTORY_LOG if not defined RUST_LOG set "VICTORY_LOG=warn"
+rem NVIDIA DLSS frame generation (RTX 40/50, Windows hardware-accelerated GPU scheduling on).
+rem Needs the Streamline runtime DLLs (sl.interposer.dll, sl.common.dll, sl.dlss_g.dll, sl.reflex.dll,
+rem sl.pcl.dll, nvngx_dlssg.dll) beside the exe or in a "streamline" folder beside this file.
+rem Without them the game starts normally with frame generation off. Set VICTORY_DLSS_FG=off to skip it.
+if not defined VICTORY_DLSS_FG set "VICTORY_DLSS_FG=on"
+if not defined VICTORY_SL_DIR if exist "%~dp0streamline\sl.interposer.dll" set "VICTORY_SL_DIR=%~dp0streamline"
 "%runner%" run "%VICTORY_GAME_DIR%\game_scarlett_master.exe" --console series-s --execute
 exit /b %errorlevel%

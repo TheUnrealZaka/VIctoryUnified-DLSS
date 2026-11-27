@@ -10,6 +10,32 @@ It is not affiliated with or endorsed by the title's developer or publisher. Lic
 
 ## What's Added on Top of `Op-lite/victory-scarlett` (`bc264a4`)
 
+## VIctoryUnified-DLSS: NVIDIA DLSS frame generation on this base
+
+This branch of [TheUnrealZaka/VIctoryUnified-DLSS](https://github.com/TheUnrealZaka/VIctoryUnified-DLSS) is
+Yaekai's 8 GB NVIDIA fork (below) plus NVIDIA Streamline DLSS frame generation, Reflex and PCL.
+Everything else is unchanged and credit for the base goes to Yaekai, Op-lite, fxceless and Marvisak.
+
+Needs an RTX 40/50 card and Windows hardware-accelerated GPU scheduling on. Without the Streamline DLLs the
+game starts normally with frame generation off.
+
+```powershell
+cargo build --release --locked -p victory
+.\scripts\get-agility-sdk.ps1      # Windows 10 only
+.\scripts\get-streamline.ps1       # downloads the Streamline runtime DLLs into .\streamline
+.\scripts\play-3070.ps1 -Game 'C:\path\to\game_scarlett_master.exe' -DlssFg
+```
+
+`VICTORY_DLSS_FG=off` disables it; `VICTORY_SL_DIR` points at the DLL folder. On hybrid laptops the script
+sets the Windows GPU preference for the exe (`VICTORY_NO_GPU_PREF=1` skips that). Known issues, such as
+frame generation switching on and off while depth/motion data is missing, are in
+[docs/dlss-frame-generation.md](docs/dlss-frame-generation.md). This branch is not yet compiled or tested
+on every setup; please report what you see.
+
+---
+
+## What's Added on Top of `Op-lite/victory-scarlett` (`835ca60`)
+
 - **8 GB VRAM & NVIDIA stability:**
   - `VICTORY_TEXTURE_MIP_DROP=1` (`resource.rs`) — drops top mip levels of large placed textures (~75% less texture VRAM; use `-MipDrop 0` on 12+ GB cards).
   - Render-target VRAM reserve settle (`VICTORY_CARD_ROOM_FOR_TARGETS_SETTLE_MS=20000`, `resource.rs`).

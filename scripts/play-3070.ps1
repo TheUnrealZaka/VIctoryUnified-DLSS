@@ -7,7 +7,9 @@ param(
     [switch]$Hooks,
     [switch]$ProbeRays,
     [switch]$RayTracing,
-    [switch]$Prewarm
+    [switch]$Prewarm,
+    [switch]$DlssFg,
+    [string]$StreamlineDir
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -118,6 +120,22 @@ if ($ProbeRays -and -not $RayTracing) {
     $set.VICTORY_AMBIENT_AIR = '1.5'
 }
 if ($RayTracing) { $set.VICTORY_BVH_BUILDER = '1' }
+
+if ($DlssFg) {
+    # NVIDIA DLSS frame generation (RTX 40/50). Needs the Streamline DLLs: scripts\get-streamline.ps1
+    $set.VICTORY_DLSS_FG = 'on'
+    if (-not $StreamlineDir) { $StreamlineDir = Join-Path $root 'streamline' }
+    if (Test-Path -LiteralPath (Join-Path $StreamlineDir 'sl.interposer.dll')) { $set.VICTORY_SL_DIR = $StreamlineDir }
+}
+
+# Hybrid-GPU laptops: make Windows pick the high-performance GPU for this exe.
+if (-not $env:VICTORY_NO_GPU_PREF) {
+    try {
+        $k = 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences'
+        if (-not (Test-Path $k)) { New-Item -Path $k -Force | Out-Null }
+        Set-ItemProperty -Path $k -Name (Resolve-Path -LiteralPath $exe).Path -Value 'GpuPreference=2;'
+    } catch { }
+}
 
 foreach ($k in $set.Keys) { Set-Item -Path "Env:$k" -Value $set[$k] }
 

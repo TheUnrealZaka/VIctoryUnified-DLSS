@@ -856,6 +856,7 @@ pub fn save_pipeline_cache() {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     #[cfg(all(windows, feature = "diagnostics"))]
     #[test]

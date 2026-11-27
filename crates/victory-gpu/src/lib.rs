@@ -31,6 +31,7 @@ mod faultbook;
 mod cores;
 pub mod descriptor;
 pub mod device;
+pub mod dlss_fg;
 #[cfg(windows)]
 mod draw;
 pub mod dxgi;
@@ -49,6 +50,8 @@ mod book;
 mod holders; // (fox F) VICTORY_HOLDERS: which buffer of ours lies where in the PC's memory
 #[cfg(windows)]
 mod heap_marks;
+#[cfg(windows)]
+pub mod hooks;
 #[cfg(windows)]
 mod host;
 #[cfg(windows)]
@@ -82,6 +85,8 @@ pub mod root;
 mod safecopy;
 #[cfg(windows)]
 mod sampler;
+#[cfg(windows)]
+mod streamline;
 #[cfg(windows)]
 pub mod shader_cache;
 #[cfg(windows)]

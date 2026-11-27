@@ -57,6 +57,8 @@ pub(crate) struct Host {
     /// The adapter the device is on, for its memory budget
     /// ([`Host::video_memory`]); `None` if the system does not name it.
     adapter: Option<IDXGIAdapter3>,
+    /// Streamline DLSS-G + Reflex + PCL session (when enabled & supported).
+    sl: Mutex<Option<crate::streamline::Session>>,
     /// 1-descriptor shader-visible fallback heaps bound when a command list
     /// omits a view or sampler heap while using directly-indexed root signatures.
     fallback_view: OnceLock<Option<ID3D12DescriptorHeap>>,
@@ -931,6 +933,13 @@ fn hang_state() -> String {
 fn create() -> windows::core::Result<Host> {
     // SAFETY: plain D3D12 object creation with valid descriptions.
     unsafe {
+        // Initialize Streamline BEFORE any D3D12 or DXGI APIs are invoked (SL Guide 2.0).
+        let on_warp = cfg!(feature = "diagnostics") && crate::switch::on("VICTORY_D3D12_WARP");
+        let mut sl = if on_warp {
+            None
+        } else {
+            crate::streamline::Session::init_early((*crate::dlss_fg::config()).clone())
+        };
         // The debug layer only in builds with diagnostics.
         let debug = cfg!(feature = "diagnostics") && crate::switch::on("VICTORY_D3D12_DEBUG");
         if debug {
@@ -1029,10 +1038,19 @@ fn create() -> windows::core::Result<Host> {
         let messages = debug
             .then(|| device.cast::<ID3D12InfoQueue>().ok())
             .flatten();
-        let queue: ID3D12CommandQueue = device.CreateCommandQueue(&D3D12_COMMAND_QUEUE_DESC {
-            Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
-            ..Default::default()
-        })?;
+        let sl_queue = sl.as_mut().and_then(|s| s.on_device_created(&device));
+        if sl_queue.is_none() {
+            // Streamline could not set up (unsupported GPU, driver or OS): run natively.
+            sl = None;
+        }
+        let queue: ID3D12CommandQueue = if let Some((native_queue, _proxy_queue)) = sl_queue {
+            native_queue
+        } else {
+            device.CreateCommandQueue(&D3D12_COMMAND_QUEUE_DESC {
+                Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
+                ..Default::default()
+            })?
+        };
         let fence: ID3D12Fence = device.CreateFence(0, D3D12_FENCE_FLAG_NONE)?;
         let event = CreateEventW(None, false, false, None)?;
         let rtvs: ID3D12DescriptorHeap =
@@ -1052,7 +1070,21 @@ fn create() -> windows::core::Result<Host> {
         let adapter = CreateDXGIFactory2::<IDXGIFactory4>(DXGI_CREATE_FACTORY_FLAGS(0))
             .and_then(|factory| factory.EnumAdapterByLuid::<IDXGIAdapter3>(device.GetAdapterLuid()))
             .ok();
+        if let Some(Ok(desc)) = adapter.as_ref().map(|a| a.GetDesc2()) {
+            tracing::info!(
+                adapter = String::from_utf16_lossy(&desc.Description).trim_end_matches('\0'),
+                dedicated_vram_mb = desc.DedicatedVideoMemory >> 20,
+                "host adapter"
+            );
+        }
         tracing::info!("host D3D12 device ready");
+        if let Err(why) = check_runtime(&device) {
+            tracing::error!("{why}");
+            return Err(windows::core::Error::new(
+                windows::Win32::Foundation::E_FAIL,
+                why,
+            ));
+        }
         Ok(Host {
             device,
             queue,
@@ -1068,6 +1100,7 @@ fn create() -> windows::core::Result<Host> {
             next_rtv: AtomicU32::new(0),
             presenter: Mutex::new(None),
             adapter,
+            sl: Mutex::new(sl),
             fallback_view: OnceLock::new(),
             fallback_sampler: OnceLock::new(),
         })
@@ -2939,6 +2972,7 @@ struct Flight {
 }
 
 /// One thing in the line of what waits for the card, in order.
+#[allow(clippy::large_enum_variant)]
 enum Late {
     Run(Flight),
     /// A bottom-of-pipe write of the flight before it: address, what, bytes.
@@ -4061,6 +4095,7 @@ fn late_line(frames: f64) {
 pub(crate) mod aside;
 pub(crate) mod awake;
 mod card_steps;
+#[allow(dead_code)] // device-removed report helper; its call sites were not merged
 pub(crate) mod indirects;
 #[cfg(feature = "diagnostics")]
 mod panel;
@@ -5897,6 +5932,9 @@ impl Host {
         let called = std::time::Instant::now();
         #[cfg(feature = "diagnostics")]
         crate::copystat::submission_begins();
+        if let Some(session) = self.sl.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            session.on_render_submit();
+        }
         // One submission at a time from preparation to copy-back: snapshots
         // and the ranges shaders write are per host copy, not per submission.
         let mut stage = crate::timeline::span("submit: the submission lock");
@@ -8596,6 +8634,7 @@ enum Touch {
     /// The copy is given to shaders.
     Write(usize),
     /// Title memory is written.
+    #[allow(dead_code)] // matched in `written_spans`; the code that builds it was not merged
     Title,
     Nothing,
     /// Another part of the submission begins.
@@ -9922,6 +9961,8 @@ struct Presenter {
     hwnd: HWND,
     meter: Meter,
     composer: Option<crate::compose::Composer>,
+    /// The swap chain was made through Streamline (DLSS-G hooks attached).
+    sl_active_swapchain: bool,
     #[cfg(feature = "diagnostics")]
     panel: panel::Panel,
 }
@@ -10288,6 +10329,9 @@ impl Meter {
                 placed = crate::descriptor::host::PLACED_TEXTURE_SLOTS.load(Ordering::Relaxed),
                 objects = crate::descriptor::host::OBJECT_TEXTURE_SLOTS.load(Ordering::Relaxed)
             );
+            if let Some(line) = crate::streamline::status_line() {
+                tracing::info!("{line}");
+            }
             #[cfg(feature = "diagnostics")]
             {
                 let put = [0, 1, 2, 3].map(|i| crate::shadow::PUT[i].swap(0, Ordering::Relaxed) as f64 / frames);
@@ -10402,6 +10446,36 @@ impl Host {
             };
         }
         let state_u32 = state;
+        let dlss_cfg = crate::dlss_fg::config();
+        let frame_inputs = crate::hooks::take_frame_inputs();
+
+        // Recreate the swap chain when DLSS-G toggles between Off and enabled (DLSS-G Guide 18.0).
+        if let Some(p_cur) = presenter.as_ref() {
+            let want_loaded = self
+                .sl
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .is_some_and(|s| s.desired_swapchain_loaded(&dlss_cfg));
+            if want_loaded != p_cur.sl_active_swapchain {
+                settle_now(WHY_SYNC);
+                {
+                    let mut sl = self.sl.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(s) = sl.as_mut() {
+                        s.before_swapchain_recreate();
+                    }
+                }
+                *presenter = None;
+                *presenter = match self.presenter(width, height, format) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "swap chain recreation failed");
+                        return None;
+                    }
+                };
+            }
+        }
+
         let p = presenter.as_mut()?;
         if planes.is_some() && p.composer.is_none() {
             match crate::compose::Composer::new(self, format) {
@@ -10416,6 +10490,11 @@ impl Host {
         if (p.width, p.height, p.format) != (width, height, format) {
             // Presents sent ahead hold back buffers until they have run.
             settle_now(WHY_SYNC);
+            if p.sl_active_swapchain
+                && let Some(s) = self.sl.lock().unwrap_or_else(|e| e.into_inner()).as_mut()
+            {
+                s.before_resize();
+            }
             // SAFETY: no back buffer is held; every submission was waited for.
             let resized = unsafe {
                 p.swap_chain
@@ -10427,6 +10506,11 @@ impl Host {
                         p.composer = None;
                     }
                     (p.width, p.height, p.format) = (width, height, format);
+                    if p.sl_active_swapchain
+                        && let Some(s) = self.sl.lock().unwrap_or_else(|e| e.into_inner()).as_mut()
+                    {
+                        s.after_resize(width, height, format, BUFFERS);
+                    }
                     tracing::info!(
                         width,
                         height,
@@ -10610,6 +10694,19 @@ impl Host {
                 ));
                 list.ResourceBarrier(&post);
             }
+            if p.sl_active_swapchain
+                && let Some(s) = self.sl.lock().unwrap_or_else(|e| e.into_inner()).as_mut()
+            {
+                s.prepare_present(
+                    &dlss_cfg,
+                    list,
+                    p.width,
+                    p.height,
+                    (texture, state.0 as u32),
+                    overlay,
+                    frame_inputs,
+                );
+            }
             copy.close();
             let flown = match slot {
                 Some(i) => {
@@ -10636,7 +10733,17 @@ impl Host {
             crate::replay::record::present(texture, state);
             let mut showing = crate::timeline::span("the host's Present");
             // (Fox port A) `VICTORY_PRESENT_SKIP`: 0 as before, 1 never, N every Nth without waiting.
+            if p.sl_active_swapchain
+                && let Some(s) = self.sl.lock().unwrap_or_else(|e| e.into_inner()).as_mut()
+            {
+                s.before_dxgi_present();
+            }
             let _ = crate::shell::present_maybe(DXGI_PRESENT_DO_NOT_WAIT.0, |flags| p.swap_chain.Present(0, DXGI_PRESENT(flags)));
+            if p.sl_active_swapchain
+                && let Some(s) = self.sl.lock().unwrap_or_else(|e| e.into_inner()).as_mut()
+            {
+                s.after_dxgi_present();
+            }
             showing.next("the frame meter");
             #[cfg(feature = "diagnostics")]
             p.panel.frame(p.meter.line_due());
@@ -10665,7 +10772,6 @@ impl Host {
         self.log_video_memory("right before the swap chain is made");
         // SAFETY: plain object creation for our window.
         unsafe {
-            let factory: IDXGIFactory2 = CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0))?;
             let desc = DXGI_SWAP_CHAIN_DESC1 {
                 Width: width,
                 Height: height,
@@ -10679,12 +10785,37 @@ impl Host {
                 SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
                 ..Default::default()
             };
-            let swap_chain = factory
-                .CreateSwapChainForHwnd(&self.queue, hwnd, &desc, None, None)?
-                .cast::<IDXGISwapChain3>()?;
+            let sl_swap = self
+                .sl
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_mut()
+                .and_then(|s| match s.create_swapchain(hwnd, &desc) {
+                    Ok(opt) => opt,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Streamline swapchain creation failed; using native swapchain");
+                        None
+                    }
+                });
+            let (swap_chain, sl_active_swapchain) = match sl_swap {
+                Some(sc) => (sc, true),
+                None => {
+                    let factory: IDXGIFactory2 = CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0))?;
+                    let sc = factory
+                        .CreateSwapChainForHwnd(&self.queue, hwnd, &desc, None, None)?
+                        .cast::<IDXGISwapChain3>()?;
+                    (sc, false)
+                }
+            };
             let copy = self.new_list()?;
             copy.close();
-            tracing::info!(width, height, format = format.0, "presenting to a window");
+            tracing::info!(
+                width,
+                height,
+                format = format.0,
+                sl_active_swapchain,
+                "presenting to a window"
+            );
             self.log_video_memory("right after the swap chain is made");
             Ok(Presenter {
                 swap_chain,
@@ -10696,6 +10827,7 @@ impl Host {
                 hwnd,
                 meter: Meter::new(),
                 composer: None,
+                sl_active_swapchain,
                 #[cfg(feature = "diagnostics")]
                 panel: panel::Panel::new(),
             })
@@ -12068,3 +12200,55 @@ mod batch {   // Batch::texture_due lives here; `mod tests` is already taken at 
     }
 }
 
+/// What the translated shaders need of the host: shader model 6.6 and root
+/// signatures with directly indexed heaps. Windows 10's built-in D3D12
+/// runtime lacks the latter (it needs the Agility SDK, see `victory`'s
+/// `agility` module); without this check every pipeline is refused and the
+/// title crashes on a null object some frames later.
+fn check_runtime(device: &ID3D12Device) -> Result<(), String> {
+    // SAFETY: plain serialization of an empty root signature and a feature
+    // query writing its own structure.
+    unsafe {
+        let desc = D3D12_VERSIONED_ROOT_SIGNATURE_DESC {
+            Version: windows::Win32::Graphics::Direct3D12::D3D_ROOT_SIGNATURE_VERSION_1_1,
+            Anonymous: D3D12_VERSIONED_ROOT_SIGNATURE_DESC_0 {
+                Desc_1_1: D3D12_ROOT_SIGNATURE_DESC1 {
+                    NumParameters: 0,
+                    pParameters: std::ptr::null(),
+                    NumStaticSamplers: 0,
+                    pStaticSamplers: std::ptr::null(),
+                    Flags: D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED
+                        | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED,
+                },
+            },
+        };
+        let mut blob: Option<windows::Win32::Graphics::Direct3D::ID3DBlob> = None;
+        if let Err(e) = D3D12SerializeVersionedRootSignature(&desc, &mut blob, None) {
+            return Err(format!(
+                "The Direct3D 12 runtime on this PC is too old for this title ({e}).\n\n\
+                 Windows 10 needs the D3D12 Agility SDK: run scripts\\get-agility-sdk.ps1 \
+                 from the VIctory folder, rebuild with cargo build --release (this puts a D3D12 \
+                 folder next to victory.exe), then start the title again. Windows 11 does not need this."
+            ));
+        }
+        let mut model = D3D12_FEATURE_DATA_SHADER_MODEL {
+            HighestShaderModel: D3D_SHADER_MODEL_6_6,
+        };
+        let supported = device
+            .CheckFeatureSupport(
+                D3D12_FEATURE_SHADER_MODEL,
+                (&raw mut model).cast(),
+                size_of_val(&model) as u32,
+            )
+            .is_ok()
+            && model.HighestShaderModel.0 >= D3D_SHADER_MODEL_6_6.0;
+        if !supported {
+            return Err(
+                "This GPU or its driver does not support shader model 6.6, which the title \
+                 needs. Update the graphics driver; if that does not help, the GPU is too old."
+                    .to_owned(),
+            );
+        }
+    }
+    Ok(())
+}

@@ -17,3 +17,44 @@ game_dir = 'D:\victory-data\game'
 # Other Xbox Series titles used to test platform-level code.
 # env: VICTORY_TEST_TITLES (separated by ';')
 test_titles = []
+
+# [dlss_fg]
+# mode = "off"                    # "off" | "on" | "auto" | "dynamic"   (CLI: --dlss-fg, env: VICTORY_DLSS_FG)
+# frames = 1                      # 1..=5 generated frames (1 = 2x)     (CLI: --dlss-fg-frames, env: VICTORY_DLSS_FG_FRAMES)
+# runtime_mode = "production"     # "production" | "development"        (CLI: --dlss-fg-runtime, env: VICTORY_DLSS_FG_RUNTIME)
+# runtime_dir = 'D:\streamline'   # Optional folder containing sl.interposer.dll etc. (default: beside victory.exe)
+# ui_recomposition = true
+# retain_when_off = true
+#
+# [dlss_fg.hooks]
+# heuristic = true                # Built-in Depth + Motion Vector heuristic when FidelityFX is not used
+# depth_inverted = true           # RAGE uses reversed-Z (near = 1.0, far = 0.0)
+# camera_motion_included = true
+# mvec_units = "auto"             # "auto" | "pixels" | "normalized"
+# probe = false                   # Log candidate Depth / MotionVector / HUDless passes (CLI: --dlss-fg-probe)
+#
+# Example explicit hook rules (Series X / non-FidelityFX passes discovered via --dlss-fg-probe):
+# [[dlss_fg.hooks.rules]]
+# role = "depth"
+# binding = "depth_target"
+# format = "D32_FLOAT"
+# width = 2560
+# height = 1440
+# occurrence = "last"
+#
+# [[dlss_fg.hooks.rules]]
+# role = "motion_vectors"
+# binding = "uav"                 # "uav" | "render_target" | "srv"
+# format = "R16G16_FLOAT"
+# width = 2560
+# height = 1440
+# occurrence = "last"
+#
+# [[dlss_fg.hooks.rules]]
+# role = "hudless"
+# shader_hash = "0123456789abcdef"
+# binding = "render_target"
+# slot = 0
+# width = 3840
+# height = 2160
+# snapshot = true

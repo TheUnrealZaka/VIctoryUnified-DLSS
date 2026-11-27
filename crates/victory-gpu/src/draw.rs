@@ -4417,6 +4417,7 @@ impl State {
         #[cfg(feature = "diagnostics")]
         self.walked(list, p);
         self.buffers_written();
+        self.notify_dlss_hooks(list, p, true);
         DISPATCHED.fetch_add(1, Ordering::Relaxed);
         if let Some(role) = p.stages.first().and_then(|s| s.shader.ambient)
             && crate::ambient::on()
@@ -4769,6 +4770,9 @@ impl State {
                     list.pass_end();
                     self.drew(crate::pipeline::host_pipeline(self.pipeline as This));
                     self.mesh_scissor(list, false);
+                    if let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) {
+                        self.notify_dlss_hooks(list, p, false);
+                    }
                     DRAWN.fetch_add(1, Ordering::Relaxed);
                     true
                 }
@@ -4811,7 +4815,7 @@ impl State {
             let draws: u32 = census.1.values().sum();
             if draws > 0 {
                 let mut rects: Vec<([i32; 4], u32)> = census.1.iter().map(|(r, n)| (*r, *n)).collect();
-                rects.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+                rects.sort_unstable_by_key(|a| std::cmp::Reverse(a.1));
                 let scissors: Vec<String> = rects
                     .iter()
                     .take(5)
@@ -4847,6 +4851,146 @@ impl State {
             let r = self.scissors.first().map_or([0; 4], |r| [r.left, r.top, r.right, r.bottom]);
             *census.1.entry(r).or_insert(0) += 1;
         }
+    }
+
+    fn notify_dlss_hooks(&self, list: &HostList, p: &HostPipeline, compute: bool) {
+        if !crate::hooks::active() {
+            return;
+        }
+        use victory_core::config::HookBinding;
+        let shader_hashes: Vec<(&'static str, &str)> = p
+            .stages
+            .iter()
+            .map(|s| (s.shader.stage, s.shader.hash.as_str()))
+            .collect();
+
+        let mut targets = Vec::new();
+        if !compute {
+            for (slot, &res) in self.targets.iter().enumerate() {
+                if res != 0
+                    && let Some((w, h, fmt)) = crate::resource::texture_kind(res as This)
+                {
+                    targets.push(crate::hooks::TargetInfo {
+                        title_resource: res as This,
+                        binding: HookBinding::RenderTarget,
+                        slot: slot as u32,
+                        width: w as u32,
+                        height: h,
+                        format: fmt,
+                    });
+                }
+            }
+            if self.depth != 0
+                && let Some((w, h, fmt)) = crate::resource::texture_kind(self.depth as This)
+            {
+                targets.push(crate::hooks::TargetInfo {
+                    title_resource: self.depth as This,
+                    binding: HookBinding::DepthTarget,
+                    slot: 0,
+                    width: w as u32,
+                    height: h,
+                    format: fmt,
+                });
+            }
+        }
+
+        let mut bound = Vec::new();
+        let view_heap = (self.heaps[0] != 0).then(|| crate::descriptor::heap(self.heaps[0] as This));
+        let roots = self.roots_ref(compute);
+        for stage in &p.stages {
+            let t = stage.translated();
+            for u in &t.used {
+                match (u.root, roots.get(usize::from(u.slot))) {
+                    (RootType::Table, Some(Root::Table(table))) => {
+                        let handle = table + u64::from(u.table_offset_dwords) * 4;
+                        let Some(view) = crate::descriptor::view(handle) else {
+                            continue;
+                        };
+                        match view {
+                            View::Constant(addr, size) => bound.push(crate::hooks::BoundResourceInfo {
+                                stage: stage.shader.stage,
+                                binding: HookBinding::Cbv,
+                                slot: u.slot as u32,
+                                table_dword: u.table_offset_dwords,
+                                title_resource: std::ptr::null(),
+                                cbv_address: addr,
+                                cbv_size: size,
+                                width: 0,
+                                height: 0,
+                                format: 0,
+                            }),
+                            View::Shader(r, _) | View::Unordered(r, _, _) => {
+                                if let Some((w, h, fmt)) = crate::resource::texture_kind(r as This) {
+                                    bound.push(crate::hooks::BoundResourceInfo {
+                                        stage: stage.shader.stage,
+                                        binding: if u.kind == ResourceType::Uav {
+                                            HookBinding::Uav
+                                        } else {
+                                            HookBinding::Srv
+                                        },
+                                        slot: u.slot as u32,
+                                        table_dword: u.table_offset_dwords,
+                                        title_resource: r as This,
+                                        cbv_address: 0,
+                                        cbv_size: 0,
+                                        width: w as u32,
+                                        height: h,
+                                        format: fmt,
+                                    });
+                                }
+                            }
+                            View::Placed(unordered, _, _) => {
+                                if let Some(View::Shader(r, _)) = crate::descriptor::host::placed_texture(&view)
+                                    && let Some((w, h, fmt)) = crate::resource::texture_kind(r as This)
+                                {
+                                    bound.push(crate::hooks::BoundResourceInfo {
+                                        stage: stage.shader.stage,
+                                        binding: if unordered { HookBinding::Uav } else { HookBinding::Srv },
+                                        slot: u.slot as u32,
+                                        table_dword: u.table_offset_dwords,
+                                        title_resource: r as This,
+                                        cbv_address: 0,
+                                        cbv_size: 0,
+                                        width: w as u32,
+                                        height: h,
+                                        format: fmt,
+                                    });
+                                }
+                            }
+                            _ => {}
+                        }
+                        let _ = view_heap;
+                    }
+                    (RootType::Constants, _) => {}
+                    (_, Some(Root::View(addr))) => {
+                        if u.kind == ResourceType::Cbv {
+                            bound.push(crate::hooks::BoundResourceInfo {
+                                stage: stage.shader.stage,
+                                binding: HookBinding::Cbv,
+                                slot: u.slot as u32,
+                                table_dword: 0,
+                                title_resource: std::ptr::null(),
+                                cbv_address: *addr,
+                                cbv_size: 4096,
+                                width: 0,
+                                height: 0,
+                                format: 0,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let ctx = crate::hooks::PassContext {
+            compute,
+            shader_hashes: &shader_hashes,
+            targets: &targets,
+            bound: &bound,
+            list,
+        };
+        crate::hooks::on_pass(&ctx);
     }
 
     fn roots_ref(&self, compute: bool) -> &Vec<Root> {
@@ -5679,6 +5823,9 @@ impl State {
             #[cfg(feature = "diagnostics")]
             list.pass_end();
             self.drew(crate::pipeline::host_pipeline(self.pipeline as This));
+            if let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) {
+                self.notify_dlss_hooks(list, p, false);
+            }
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
         if !ran {
@@ -5788,6 +5935,9 @@ impl State {
             #[cfg(feature = "diagnostics")]
             list.pass_end();
             self.drew(crate::pipeline::host_pipeline(self.pipeline as This));
+            if let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) {
+                self.notify_dlss_hooks(list, p, false);
+            }
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
         if !ran {
@@ -6144,6 +6294,7 @@ impl State {
         // The scratch buffer stays readable as arguments: the next draw of
         // the window reads it with no barrier, and the next clamp moves it
         // back (`crate::indirect`).
+        self.notify_dlss_hooks(list, p, kind == DISPATCH);
         if kind == DISPATCH {
             DISPATCHED.fetch_add(1, Ordering::Relaxed);
         } else {

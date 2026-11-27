@@ -2,7 +2,41 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::{Console, Unimplemented};
+use crate::{Console, DlssFgArg, SlRuntimeArg, Unimplemented};
+
+#[derive(Default, Clone, Copy)]
+pub struct DlssFgOverrides {
+    pub mode: Option<DlssFgArg>,
+    pub frames: Option<u32>,
+    pub runtime: Option<SlRuntimeArg>,
+    pub probe: bool,
+}
+
+#[cfg(windows)]
+struct FidelityFxSpyResolver<'a>(&'a dyn victory_loader::ImportResolver);
+
+#[cfg(windows)]
+impl victory_loader::ImportResolver for FidelityFxSpyResolver<'_> {
+    fn resolve(
+        &self,
+        dll: &str,
+        symbol: &victory_pe::ImportSymbol,
+    ) -> victory_loader::Resolution {
+        let res = self.0.resolve(dll, symbol);
+        if let victory_loader::Resolution::Found {
+            address,
+            provenance: victory_loader::Provenance::Title,
+        } = res
+            && let victory_pe::ImportSymbol::Name { name, .. } = symbol
+        {
+            return victory_loader::Resolution::Found {
+                address: victory_hle::modules::fidelityfx::wrap_xbox_export(dll, name, address),
+                provenance: victory_loader::Provenance::Title,
+            };
+        }
+        res
+    }
+}
 
 #[cfg(any(windows, test))]
 const SKIP_CPU_CHECK_ENV: &str = "VICTORY_SKIP_CPU_CHECK";
@@ -42,6 +76,7 @@ pub fn run(
     strict: bool,
     execute: bool,
     console: Console,
+    fg_overrides: DlssFgOverrides,
 ) -> Result<()> {
     use std::sync::Arc;
     use victory_hle::{HleResolver, HostPolicy};
@@ -50,9 +85,45 @@ pub fn run(
     if execute {
         check_cpu_features()?;
     }
+    #[cfg(target_env = "msvc")]
+    crate::agility::warn_if_missing();
     // A title that relaunched itself: the old process must be gone first.
     victory_hle::modules::lifecycle::wait_for_previous();
-    let cfg = victory_core::Config::load()?;
+    let mut cfg = victory_core::Config::load()?;
+    if let Some(m) = fg_overrides.mode {
+        cfg.dlss_fg.mode = match m {
+            DlssFgArg::Off => victory_core::config::DlssFgMode::Off,
+            DlssFgArg::On => victory_core::config::DlssFgMode::On,
+            DlssFgArg::Auto => victory_core::config::DlssFgMode::Auto,
+            DlssFgArg::Dynamic => victory_core::config::DlssFgMode::Dynamic,
+        };
+    }
+    if let Some(frames) = fg_overrides.frames {
+        cfg.dlss_fg.frames = frames.clamp(1, 5);
+    }
+    if let Some(rt) = fg_overrides.runtime {
+        cfg.dlss_fg.runtime_mode = match rt {
+            SlRuntimeArg::Prod => victory_core::config::SlRuntimeMode::Production,
+            SlRuntimeArg::Dev => victory_core::config::SlRuntimeMode::Development,
+        };
+    }
+    if fg_overrides.probe {
+        cfg.dlss_fg.hooks.probe = true;
+    }
+    if cfg.dlss_fg.runtime_mode == victory_core::config::SlRuntimeMode::Development
+        && cfg.dlss_fg.log_dir.is_none()
+    {
+        cfg.dlss_fg.log_dir = Some(cfg.cache_subdir("streamline")?);
+    }
+    println!("fork           {}", crate::FORK_ID);
+    eprintln!("fork {}", crate::FORK_ID);
+    println!(
+        "dlss-fg        {} ({}x, runtime: {})",
+        cfg.dlss_fg.mode.as_str(),
+        cfg.dlss_fg.frames + 1,
+        cfg.dlss_fg.runtime_mode.as_str()
+    );
+    victory_gpu::dlss_fg::configure(cfg.dlss_fg.clone());
     let original = std::fs::read(exe).with_context(|| format!("reading {}", exe.display()))?;
     let prepared = victory_loader::prepare(&original)?;
     let hash = prepared.original_hash.to_hex();
@@ -146,6 +217,7 @@ pub fn run(
         inner: &resolver,
         dlls: &dlls,
     };
+    let spy_resolver = FidelityFxSpyResolver(&with_dlls);
     let show = |name: &str, report: BindReport| {
         println!(
             "bound          {name}: {} hle, {} host, {} title, {} missing",
@@ -159,10 +231,10 @@ pub fn run(
         }
     };
     for (name, dll) in &dlls {
-        show(name, dll.bind_imports(&with_dlls, policy)?);
+        show(name, dll.bind_imports(&spy_resolver, policy)?);
     }
     let exe_name = exe.file_name().unwrap_or_default().to_string_lossy();
-    show(&exe_name, image.bind_imports(&with_dlls, policy)?);
+    show(&exe_name, image.bind_imports(&spy_resolver, policy)?);
     if execute {
         let size = image.info().size_of_image as usize;
         // SAFETY: the image stays mapped, and nothing of it has run yet.
@@ -384,12 +456,13 @@ impl LateDlls {
                     inner: &old,
                     dlls: &new,
                 };
+                let spy_resolver = FidelityFxSpyResolver(&resolver);
                 for (name, dll) in &new {
                     println!(
                         "title dll      {name} at {:#x} (loaded by the title)",
                         dll.base()
                     );
-                    show(name, dll.bind_imports(&resolver, self.policy)?);
+                    show(name, dll.bind_imports(&spy_resolver, self.policy)?);
                     set_image_path(dll.base(), &self.title_dir.join(name));
                 }
                 // Visible before their `DllMain`s run, which may load more.
@@ -558,6 +631,13 @@ mod cpu_check_tests {
 }
 
 #[cfg(not(windows))]
-pub fn run(_: &Path, _: Unimplemented, _: bool, _: bool, _: Console) -> Result<()> {
+pub fn run(
+    _: &Path,
+    _: Unimplemented,
+    _: bool,
+    _: bool,
+    _: Console,
+    _: DlssFgOverrides,
+) -> Result<()> {
     anyhow::bail!("running titles requires Windows")
 }
