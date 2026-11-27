@@ -20,6 +20,12 @@ pub fn is_xbox_dll(file: &str) -> bool {
     DLLS.iter().any(|d| d.eq_ignore_ascii_case(file))
 }
 
+/// The loader is the DLL the title calls. It looks the provider DLLs'
+/// (upscaler, frame generation) exports of the same names up itself, and
+/// those must stay as they are: wrapping them sends the title's calls
+/// straight to a provider, past the loader, which crashes it.
+const LOADER: &str = "amd_fidelityfx_loader_xbox.dll";
+
 // ffxReturnCode_t
 const ERROR: u32 = 1;
 
@@ -189,11 +195,11 @@ extern "system" fn spy_dispatch(ctx: *mut *mut c_void, desc: *mut u8) -> u32 {
     unsafe { f(ctx, desc) }
 }
 
-/// Wraps the exports of the title's own mapped `amd_fidelityfx_*_xbox.dll`,
+/// Wraps the exports of the title's own mapped `amd_fidelityfx_loader_xbox.dll`,
 /// so the console FSR keeps running while the depth, motion vectors, jitter
 /// and camera values of each upscale are read for DLSS frame generation.
 pub fn wrap_xbox_export(dll: &str, name: &str, real_addr: usize) -> usize {
-    if !is_xbox_dll(dll) || real_addr == 0 {
+    if !dll.eq_ignore_ascii_case(LOADER) || real_addr == 0 {
         return real_addr;
     }
     let (slot, wrapper): (&AtomicUsize, usize) = match name {
