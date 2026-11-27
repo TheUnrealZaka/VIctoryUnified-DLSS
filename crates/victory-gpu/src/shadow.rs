@@ -1776,24 +1776,53 @@ pub(crate) fn wide_run(jobs: Vec<Box<dyn FnOnce() + Send>>) {
 /// this one, the next number to whichever is free: for thousands of small
 /// pieces of work, where a job each ([`wide`]) is mostly the jobs' queue.
 pub(crate) fn wide_each(n: usize, work: impl Fn(usize) + Send + Sync + 'static) {
+    wide_ranges(n, 1, move |range| range.for_each(&work));
+}
+
+/// Claims adjacent jobs together to keep small refreshes from contending
+/// on one atomic for each range. Long or uneven jobs can still claim one.
+pub(crate) fn wide_ranges(n: usize, grain: usize, work: impl Fn(std::ops::Range<usize>) + Send + Sync + 'static) {
+    if n == 0 {
+        return;
+    }
+    let grain = grain.max(1);
     let next = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let work = Arc::new(work);
-    let threads = (wide_threads() + 1).min(n);
+    let threads = (wide_threads() + 1).min(n.div_ceil(grain));
     let jobs = (0..threads)
         .map(|_| {
             let (next, work) = (next.clone(), work.clone());
             Box::new(move || {
                 loop {
-                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let i = next.fetch_add(grain, Ordering::Relaxed);
                     if i >= n {
                         break;
                     }
-                    work(i);
+                    work(i..i.saturating_add(grain).min(n));
                 }
             }) as Job
         })
         .collect();
     wide(jobs);
+}
+
+#[cfg(test)]
+mod wide_range_tests {
+    use super::*;
+
+    #[test]
+    fn grouped_work_visits_each_index_once() {
+        for n in [0, 1, 7, 8, 9, 63, 64, 255, 513] {
+            let counts = Arc::new((0..n).map(|_| std::sync::atomic::AtomicU8::new(0)).collect::<Vec<_>>());
+            let shared = counts.clone();
+            wide_ranges(n, 8, move |range| {
+                for i in range {
+                    shared[i].fetch_add(1, Ordering::Relaxed);
+                }
+            });
+            assert!(counts.iter().all(|count| count.load(Ordering::Relaxed) == 1), "{n} jobs");
+        }
+    }
 }
 
 /// About this many bytes to a piece of work for [`wide`].
