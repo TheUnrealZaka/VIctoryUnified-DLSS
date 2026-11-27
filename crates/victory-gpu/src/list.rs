@@ -217,6 +217,20 @@ impl Drop for TitleOp {
     }
 }
 
+/// Runs `f` with the host list behind `this` and the draw state the title
+/// set on it; `false` if `this` has no host list.
+#[cfg(windows)]
+pub(crate) fn with_host(
+    this: This,
+    f: impl FnOnce(&crate::host::HostList, &mut crate::draw::State),
+) -> bool {
+    if host_list(this).is_none() {
+        return false;
+    }
+    with_state(this, f);
+    true
+}
+
 pub(crate) fn host_list<'a>(this: This) -> Option<&'a crate::host::HostList> {
     if this.is_null() {
         return None;
