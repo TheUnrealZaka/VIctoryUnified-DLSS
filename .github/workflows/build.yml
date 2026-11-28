@@ -1,0 +1,53 @@
+# Builds victory.exe on a Windows runner and packs it with the launchers.
+#   - Actions tab > Build > Run workflow : a zip you download from the run's "Artifacts"
+#   - git tag v1.0 && git push origin v1.0 : the same zip attached to a GitHub Release
+# It does not include NVIDIA's DLLs or any game file; the zip's scripts download the SDKs on the player's PC.
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # only used to attach the zip to a release
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      # The version and target pinned in rust-toolchain.toml.
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked -p victory
+
+      - name: Pack
+        shell: pwsh
+        run: |
+          $name = "VIctory-win64-$($env:GITHUB_SHA.Substring(0,7))"
+          $dir = New-Item -ItemType Directory -Force -Path $name
+          Copy-Item target\release\victory.exe $dir
+          Copy-Item scripts $dir -Recurse
+          foreach ($f in Get-ChildItem -File *.cmd, README.md, LICENSE -ErrorAction SilentlyContinue) { Copy-Item $f $dir }
+          Compress-Archive -Path $dir -DestinationPath "$name.zip"
+          "ZIP=$name.zip" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: victory-win64
+          path: ${{ env.ZIP }}
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP }}

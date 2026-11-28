@@ -1,6 +1,6 @@
 # VIctoryUnified-DLSS
 
-Zakaria's (TheUnrealZaka) working copy of [trustno1-coder/VIctory-NVIDIA](https://github.com/trustno1-coder/VIctory-NVIDIA),
+TheUnrealZaka's working copy of [trustno1-coder/VIctory-NVIDIA](https://github.com/trustno1-coder/VIctory-NVIDIA),
 all credit for the renderer, DLSS and frame generation to it and the projects it lists below. Added here:
 the `fork` line in the run log, and `scripts\play-5060.ps1` for hybrid-graphics laptops (picks the RTX
 card by name and sets the Windows high-performance GPU preference).
