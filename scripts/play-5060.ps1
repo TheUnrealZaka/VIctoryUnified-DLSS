@@ -21,7 +21,8 @@ if (-not $env:VICTORY_NO_GPU_PREF) {
     } catch { Write-Host "Could not set the GPU preference: $_" }
 }
 Write-Host 'VIctoryUnified-DLSS by TheUnrealZaka | github.com/TheUnrealZaka/VIctoryUnified-DLSS'
-$fast = if ($NoFast) { @() } else { @('-Fast') }
+$fast = if ($NoFast) { @{} } else { @{ Fast = $true } }
 & (Join-Path $PSScriptRoot 'play-foxhound.ps1') -Exe $Exe -SeriesS -FrameGen @fast @args
+
 
 
