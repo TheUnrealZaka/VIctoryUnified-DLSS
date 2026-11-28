@@ -10,7 +10,124 @@ card by name and sets the Windows high-performance GPU preference).
 .\scripts\play-5060.ps1 -Exe 'C:\path\to\game_scarlett_master.exe'
 ```
 
-This repository contains no game files. The older Streamline port is kept on the `main` branch.
+This repository contains no game files. The older Streamline port is kept on the `legacy-cool-fox` branch.
+
+---
+
+Below: the README of [Kemerd/VIctory-NVIDIA-RT](https://github.com/Kemerd/VIctory-NVIDIA-RT), merged in.
+
+# VIctory-NVIDIA-RT
+
+A fork of [VIctory-NVIDIA](https://github.com/trustno1-coder/VIctory-NVIDIA), released on its own:
+higher frame rates, 32:9 and HDR10, a one-click launcher with every option, and the groundwork for the title's ray
+tracing on the RTX cores.
+
+![PLAY.cmd, the launcher: resolution, window, console, DLSS, frame generation, Reflex, HDR10, frame cap, wide interface and speed on one screen](https://github.com/Kemerd/VIctory-NVIDIA-RT/releases/download/rt-test-7/launcher.png)
+
+**Download:** [latest test build](https://github.com/Kemerd/VIctory-NVIDIA-RT/releases) (`victory.exe`, `victory-win10.exe` and `PLAY.cmd`).
+Put them next to your own `random_xbox_game.exe` and double-click `PLAY.cmd`.
+
+| RTX 5090, 2560x1440, DLSS Quality, open world, no frame generation | official settings | this fork (fast) |
+|---|---|---|
+| median | 11.8 fps | **21.9 fps** |
+| best | 18.3 fps | **31.9 fps** |
+
+## Bug ##
+1. If faces invisible restart game once
+2. If low FPS turn down DLSS, or turn off RT
+3. If crash post .dmp and .log
+4. If the crash says `DXGI_ERROR_...` (device removed, device hung, driver reset), the card stopped answering.
+   This layer pushes the GPU harder and longer than most games do, so:
+   - **Take off any GPU overclock or undervolt first** (MSI Afterburner, the NVIDIA app's auto-tune). Settings that
+     are stable in other games often aren't here. Test at stock clocks.
+   - **Give Windows more time before it resets the GPU (TDR).** Long shader and BVH work can pass Windows' 2-second
+     limit. In `regedit`, open `HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\GraphicsDrivers`, add a
+     `DWORD (32-bit)` named `TdrDelay` with the value `10` (decimal), and reboot. Delete it to go back.
+   - Still crashing at stock clocks with `TdrDelay`? Post the `.dmp` and `.log` as an issue.
+
+## The launcher, `PLAY.cmd`
+
+Enter starts with the recommended settings, or with your last ones. **C** walks through ten choices:
+
+1. **Resolution:** 2560x1440, 1920x1080 upscaled to 1440, 3840x2160, **5120x1440 (32:9)**, **3440x1440 (21:9)**, or any width from 2560 to 7680 at 1440 high. (The game's output can only be patched at 1440 high so far: 16:10 and 2560x1080 are not possible yet.)
+2. **Window:** fullscreen with no border (default) or in a window.
+3. **Console profile:** Series X, the default and the one to use. Series S (1280x720 inside, much softer) is only for weaker cards.
+4. **DLSS:** Quality, Balanced, Performance, DLAA or off.
+5. **Frame generation:** ready to switch on in F1, **2x to 6x** from the start (3x and up need an RTX 50), or not loaded.
+6. **NVIDIA Reflex:** on + boost (default), on, or off (frame generation turns it on anyway).
+7. **HDR10** on or off (turn Windows HDR on first).
+8. **Frame cap:** none, 30, 60, 120, 144 or any.
+9. **Interface on ultrawide screens:** kept 16:9 in the middle, or stretched.
+10. **Speed:** fast (recommended), plain (the official release's settings), or fast with the title's own ray tracing (experimental, 5-8 fps).
+
+The choices are remembered; `PLAY.cmd last` starts with no questions. The launcher's resolution, DLSS, frame
+generation and HDR choices win over the ones the F1 menu saved; every other F1 choice is kept.
+
+## What this fork adds
+
+- **Pipelines from pieces.** The title builds many pipelines from loose pieces (console code, metadata and
+  register packets) instead of finished containers. They are now assembled and translated, so those draws happen.
+  A stage that does not translate refuses its pipeline when it is created and the title falls back, so it is never
+  worse than before. Graphics only for now; compute from pieces is being fixed.
+- **The submitting thread in parallel:** one refresh step per list instead of about 52,000 single steps a frame,
+  title writes that clear only the refreshes they overlap, merges that read only the 4 KiB parts written, and
+  `ExecuteCommandLists` on a thread of its own.
+- **Faster loading:** pipelines with static samplers are stored as a sampler table and kept in the pipeline
+  library, instead of about 1,100 being made again by the driver every run (1.4 s each).
+- **32:9 and HDR10.** The display mode is patched wider, so the camera, culling and motion vectors are made for
+  the wide picture; the interface stays 16:9 in the middle. The upload memory that crashed 32:9 runs is fixed.
+- **NVIDIA Reflex.** Low latency mode is on by itself whenever frame generation is on, which takes back much of the delay generated frames add. The launcher turns it on with boost by default.
+- **Ray tracing.** The title's own builder calls are interposed (`VICTORY_RT_NATIVE=1`). It works, at 5-8 fps.
+  Next: a builder of our own and the title's two traversal loop shapes on RayQuery, then DLSS Ray Reconstruction.
+
+## How the frame pipeline was rebuilt
+
+The title was written for a console where the CPU and the GPU share one memory. A PC with an RTX card has two, with
+a bus between them. Almost every slow frame came down to that, so the path from the title's draw calls to the picture
+on your screen was rebuilt stage by stage. Each stage is behind its own `VICTORY_*` switch, so it can be compared
+against the old path, and `PLAY.cmd` turns on the set that measured fastest.
+
+1. **Recording: the title's command lists are written down, not run.** On the console the title records straight
+   into GPU memory. Here each list call is noted in a compact list of words (`VICTORY_THIN=1`), and threads of ours
+   turn those words into D3D12 calls, in parallel with the title's own threads. The title's recording threads never
+   wait for D3D12.
+2. **Shaders: console GPU code becomes DXIL.** Every program the title has (vertex, pixel, compute, mesh) is decoded
+   from the console's own machine code and translated to DXIL for the RTX card. Wave64 code runs on NVIDIA's 32-lane
+   waves. The translated programs are cached on disk, and the host pipelines go into the driver's pipeline library,
+   so a second start loads fast.
+3. **Pipelines from pieces.** Many of the title's pipelines are not finished containers but loose pieces: a stage's
+   code, its metadata and raw register packets. Those are now assembled, the registers read (blend, depth, cull,
+   export formats), and the result translated into one host pipeline. A piece that does not translate refuses its
+   pipeline when it is made, so the title takes its own fallback instead of drawing garbage.
+4. **Memory: where the bytes are, and who moves them.** A title buffer can exist in four places: its own memory, our
+   copy in PC memory, an upload heap, and the card. The rebuilt path moves each byte at most once:
+   - the title's writes are watched page by page, and only the 4 KiB pages it touched are copied;
+   - a buffer the card wrote and the card reads stays on the card (`VICTORY_CARD_STEPS`, the relay), without a trip
+     back through the CPU;
+   - shaders that read memory by address (the console's 40-bit pointers) find it through a directory of title
+     memory on the card, kept in step frame by frame;
+   - textures go up in order of use, with room held back for DLSS and frame generation.
+5. **Submitting: one thread used to do everything; now it prepares, and others send.** The submitting thread was the
+   limit at 32:9. It now takes one refresh step per list instead of about 52,000 single steps a frame, merges only
+   the parts that changed, and hands `ExecuteCommandLists` and the fence signals to a thread of their own
+   (`VICTORY_SEND_THREAD=1`). It moves straight on to the next submission.
+6. **Presenting.** The frame, the interface plane and HDR10 are composed into the swap chain's buffer on the card.
+   NVIDIA Streamline adds DLSS Super Resolution, Frame Generation (2x-6x) and Reflex there, before the present.
+   Since test 8 the present also waits for the send thread, so the frame's last copy always reaches the card first.
+
+The numbers behind each choice are in [docs/findings.md](docs/findings.md). How the parts fit together is in
+[docs/architecture.md](docs/architecture.md).
+
+## Building it
+
+```powershell
+git clone https://github.com/Kemerd/VIctory-NVIDIA-RT
+cd VIctory-NVIDIA-RT
+.\Get-NVIDIA-DLSS.cmd
+powershell -ExecutionPolicy Bypass -File scripts\play-nvidia.ps1 -Exe 'D:\Games\MyDump\game_scarlett_master.exe' -Fast
+```
+
+Everything below is the upstream README.
 
 ---
 
@@ -69,6 +186,9 @@ This repository contains no game files. The older Streamline port is kept on the
   generation files (about 70 MB) from NVIDIA's own GitHub. They are NVIDIA's
   and are not part of this program; say no and the game still runs, with its
   own upscaling and no frame generation.
+- **If it crashes,** it leaves `crash-<time>.log` (the run's log, ending with
+  the crash report) and `crash-<time>.dmp` (a small minidump) next to
+  `PLAY.cmd`, and the launcher names them. Send both.
 - Settings, saves, caches, logs and NVIDIA's and AMD's files are kept under
   `%LOCALAPPDATA%\victory`. The one exception is on Windows 10. Its own Direct3D 12
   stops at shader model 6.5, and the game's translated shaders need 6.6. Without
@@ -149,7 +269,7 @@ tuned for **NVIDIA RTX** cards.
 
 This repository did not come from one place, and the base it stands on today
 is the end of a long comparison, not the start of the work. Over several weeks
-we built, ran and measured many projects on the same NVIDIA PC: Leonida,
+we built, ran and measured many projects on the same NVIDIA PC:
 [Marvisak's VIctory](https://github.com/Marvisak/VIctory),
 [fxceless's fork](https://github.com/fxceless/victory-fork),
 [the 7900 XTX fork](https://github.com/avatarmanz/VIctory-7900XTX),
@@ -306,6 +426,13 @@ What is known to be wrong:
   about a second passes after a change before they come.
 - **The first run of every new build stutters** while the driver compiles
   pipelines (foxhound's README, *Warming up*, says how to make them ahead).
+- **32:9 (-Res wide, VICTORY_DISPLAY_WIDE) has not been run on the title.** It
+  is written (the image is patched for the wide output, the interface composite
+  is placed in the middle, DLSS and frame generation take the wide sizes from
+  the title) and compiled, not seen. What a first run has to show is listed in
+  docs/dlss.md's 32:9 notes. If the world looks stretched, the title kept a
+  16:9 camera: try VICTORY_ASPECT=5120x1440 with it (it widens projections in
+  our copy only, so the title's own culling stays narrow).
 - "SAVE AND RESTART NOW" can leave the old game's process behind without a
   window; it goes when the PC restarts.
 - What foxhound lists as wrong (the heat-haze pass left out, hitches in
@@ -348,10 +475,14 @@ fork has always had; its options:
 | `-Fps 60` | a frame rate cap (30 is the title's own) |
 | `-SeriesS` | the Series S profile: 1280x720 inside, faster, softer |
 | `-Res 1080to1440` / `4k` | scene at 1080p upscaled by the title / the stock 3840x2160 output |
+| `-Res wide` | Series X at 5120x1440 (32:9): the title's own camera, culling and motion vectors made for the wide picture, the interface kept 16:9 in the middle; another wide size: `-Res 1440 -More @{VICTORY_DISPLAY_WIDE='3440x1440'}` |
 | `-NoFrameGenReady` | frame generation only with `-FrameGen` (it is otherwise made ready at every start, so the menu can switch it) |
 | `-FgType auto` / `dlss` / `fsr` | which frame generation (see the top of this page); FSR 3's DLLs from `VICTORY_FIDELITYFX_DIR`, else `amd-sdk\FidelityFX\bin` here |
 | `-Build diag` | the diagnostics build (slower; captures, timelines, recording time in the F3 panel) |
 | `-More @{VICTORY_X='1'}` | add or override any switch |
+
+The first wide start patches and writes its own copy of the image
+(`images\native-1440p-5120x1440-...`), like the other pictures.
 
 What the F1 menu saved (`victory-settings.txt`) goes over these at every start;
 delete that file to go back to them. Full screen: start the game, then run
