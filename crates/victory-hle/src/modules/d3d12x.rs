@@ -22,6 +22,14 @@ extern "system" fn create_device(
     victory_gpu::resource::use_many_page_mapper(super::xmem::map_aliases);
     #[cfg(windows)]
     victory_gpu::on_failure(host_gpu_failed);
+    // The title's folder: its manifest names the game and its logos for the window.
+    #[cfg(windows)]
+    if let Some(dir) = crate::runtime::main_image()
+        .and_then(crate::runtime::image_path)
+        .and_then(|exe| exe.parent().map(std::path::Path::to_owned))
+    {
+        victory_gpu::shell::use_title_dir(dir);
+    }
     device::create(adapter, parameters, iid, out)
 }
 

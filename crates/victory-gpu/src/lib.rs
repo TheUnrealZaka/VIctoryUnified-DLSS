@@ -43,6 +43,8 @@ mod book;
 #[cfg(windows)]
 mod heap_marks;
 #[cfg(windows)]
+pub mod shell; // the game's name and logos from its manifest, for the window
+#[cfg(windows)]
 mod host;
 /// The F1 settings menu is shown (`host/menu.rs`): the title gets no keyboard meanwhile
 /// (read by the input module).

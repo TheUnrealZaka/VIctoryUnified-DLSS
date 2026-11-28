@@ -10404,12 +10404,15 @@ impl Meter {
             self.caption = Some(buffer);
         }
         let Some(caption) = &self.caption else { return };
-        // With frame generation showing more frames than are rendered, both rates.
-        let text = match crate::streamline::shown_per_frame() {
-            1 => format!(" | VIctory-NVIDIA {fps:.0} fps {ms:.1} ms/frame {draws:.0} draws/frame"),
-            per => format!(" | VIctory-NVIDIA {fps:.0} fps (frame gen {:.0} fps) {ms:.1} ms/frame {draws:.0} draws/frame", fps * f64::from(per)),
-        };
-        let mut text: Vec<u16> = caption.iter().copied().chain(text.encode_utf16()).collect();
+        // "Scarlett | <game> | F FPS | M ms | D draws", the game's name and logos from its
+        // manifest; with frame generation showing more frames than are rendered, the shown rate last.
+        let mut text = crate::shell::caption_for(caption, fps, draws);
+        let _ = ms;
+        let per = crate::streamline::shown_per_frame();
+        if per != 1 {
+            text.push_str(&format!(" | frame gen {:.0} FPS", fps * f64::from(per)));
+        }
+        let mut text: Vec<u16> = text.encode_utf16().collect();
         text.push(0);
         // Setting the text waits for the window's thread (a title thread,
         // which may not pump for a while), so a thread of ours does it and
@@ -10777,6 +10780,8 @@ impl Host {
             Some(hwnd) => hwnd,
             None => window(width, height)?,
         };
+        // The game's logos as the window's icons, on a thread of their own (a failure leaves the window's own).
+        crate::shell::set_icons(hwnd);
         self.log_video_memory("right before the swap chain is made");
         // SAFETY: plain object creation for our window.
         unsafe {
